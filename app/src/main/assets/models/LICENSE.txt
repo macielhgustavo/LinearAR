@@ -1,0 +1,5 @@
+Compressor EnergyAR
+Modelo original criado proceduralmente para o projeto EnergyAR com apoio de IA.
+Licença: CC0 1.0 Universal
+https://creativecommons.org/publicdomain/zero/1.0/
+Na medida permitida por lei, os direitos sobre este modelo são dedicados ao domínio público.
