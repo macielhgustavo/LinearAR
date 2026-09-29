@@ -1,189 +1,161 @@
 package br.com.linear.energyar.ui
 
+import android.content.Intent
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import br.com.linear.energyar.EnergyViewModel
-import br.com.linear.energyar.ar.ARScreen
+import br.com.linear.energyar.R
+import br.com.linear.energyar.ar.InspectionLab
 import br.com.linear.energyar.data.*
-
-private val Mint = Color(0xFF76E8B4)
-private val Ink = Color(0xFF101820)
-private val Panel = Color(0xFF1C2934)
-private fun MachineStatus.color() = when(this) {
-    MachineStatus.NORMAL -> Mint
-    MachineStatus.WARNING -> Color(0xFFFFD17D)
-    MachineStatus.CRITICAL -> Color(0xFFFF8E8E)
-}
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EnergyApp(vm: EnergyViewModel = viewModel()) {
-    val anomaly by vm.anomaly.collectAsStateWithLifecycle()
-    val machines = remember(anomaly) { vm.machines(anomaly) }
+fun EnergyApp(vm: EnergyViewModel=viewModel()) {
+    val state by vm.state.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    var selected by rememberSaveable { mutableStateOf<String?>(null) }
-    val machine = machines.firstOrNull { it.id == selected }
-    val titles = listOf("Visão geral", "Máquinas", "Realidade aumentada", "Alertas")
-    MaterialTheme(colorScheme = darkColorScheme(primary = Mint, background = Ink, surface = Panel)) {
-        BackHandler(enabled = selected != null || tab != 0) { if(selected != null) selected = null else tab = 0 }
-        Scaffold(
-            topBar = { TopAppBar(title = { Column {
-                Text("ENERGYAR", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text(machine?.name ?: titles[tab], style = MaterialTheme.typography.labelMedium, color = Mint)
-            } }, navigationIcon = { if(machine != null) IconButton(onClick = { selected = null }) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar")
-            } }) },
-            bottomBar = { NavigationBar {
-                val icons = listOf(Icons.Default.Dashboard, Icons.Default.PrecisionManufacturing, Icons.Default.ViewInAr, Icons.Default.Notifications)
-                listOf("Início", "Máquinas", "AR", "Alertas").forEachIndexed { index, label ->
-                    NavigationBarItem(selected = tab == index && selected == null,
-                        onClick = { tab = index; selected = null }, icon = { Icon(icons[index], label) }, label = { Text(label) })
-                }
-            } }
-        ) { padding ->
-            val mod = Modifier.fillMaxSize().padding(padding)
-            if(machine != null) MachineDetail(machine, mod, onAR = { selected = null; tab = 2 })
-            else when(tab) {
-                0 -> Dashboard(machines, anomaly, vm::setAnomaly, mod, { selected = it }, { tab = 2 })
-                1 -> LazyColumn(mod, contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    item { SimulationLabel() }
-                    items(machines, key = { it.id }) { MachineCard(it) { selected = it.id } }
-                }
-                2 -> ARScreen(machines.first(), anomaly, vm::setAnomaly, mod)
-                3 -> LazyColumn(mod, contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    item { SimulationLabel() }
-                    val alerts = machines.filter { it.status != MachineStatus.NORMAL }
-                    if(alerts.isEmpty()) item { Text("Nenhum alerta ativo neste cenário.") }
-                    items(alerts, key = { it.id }) { m -> Card(onClick = { selected = m.id }) {
-                        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(m.name, fontWeight = FontWeight.Bold)
-                            Text("${m.deviationPercent.decimal()}% acima da referência", color = m.status.color())
-                            Text(m.recommendation)
-                        }
-                    } }
-                }
+    var useAR by rememberSaveable { mutableStateOf(false) }
+    var machineId by rememberSaveable { mutableStateOf<String?>(null) }
+    val machines=remember(state.scenario){machinesFor(state.scenario)}
+    val snackbar=remember{SnackbarHostState()};val scope=rememberCoroutineScope()
+    fun message(text:String){scope.launch{snackbar.showSnackbar(text)}}
+    fun lab(ar:Boolean){useAR=ar;tab=2;machineId=null}
+    BackHandler(enabled=tab!=0 || machineId!=null){if(machineId!=null)machineId=null else tab=0}
+    MaterialTheme(colorScheme=darkColorScheme(primary=Mint,onPrimary=Ink,primaryContainer=Color(0xFF244438),onPrimaryContainer=Mint,
+        secondary=Blue,onSecondary=Ink,secondaryContainer=Color(0xFF263F48),onSecondaryContainer=Mint,
+        tertiary=Amber,onTertiary=Ink,background=Ink,onBackground=Color(0xFFEAF1F5),surface=Panel,onSurface=Color(0xFFEAF1F5),
+        surfaceVariant=Panel,onSurfaceVariant=Muted,outline=Color(0xFF435561),outlineVariant=Color(0xFF273A45)),shapes=Shapes(medium=RoundedCornerShape(20.dp),large=RoundedCornerShape(26.dp))) {
+        Scaffold(snackbarHost={SnackbarHost(snackbar)},topBar={
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal=22.dp,vertical=14.dp),verticalAlignment=Alignment.CenterVertically){
+                Box(Modifier.size(38.dp).background(Mint,RoundedCornerShape(12.dp)),contentAlignment=Alignment.Center){Icon(Icons.Default.Bolt,null,tint=Ink)}
+                Spacer(Modifier.width(12.dp));Column(Modifier.weight(1f)){Text("ENERGYAR",fontWeight=FontWeight.Black,style=MaterialTheme.typography.titleMedium);Eyebrow("LINEAR  /  INSPEÇÃO ENERGÉTICA")}
+                StatusPill("DEMO",Blue)
             }
-        }
-    }
-}
-
-@Composable
-private fun SimulationLabel() {
-    Text("DEMONSTRAÇÃO • DADOS SIMULADOS", style = MaterialTheme.typography.labelSmall, color = Mint)
-}
-
-@Composable
-private fun Dashboard(machines: List<Machine>, anomaly: Boolean, onAnomaly: (Boolean) -> Unit, modifier: Modifier, onMachine: (String) -> Unit, onAR: () -> Unit) {
-    val total = machines.sumOf { it.consumptionKwh }
-    LazyColumn(modifier, contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        item { SimulationLabel() }
-        item { Column {
-            Text("Energia sob controle", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("Explore a operação e visualize o equipamento no seu ambiente.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        } }
-        item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Consumo acumulado hoje")
-            Text("${total.decimal()} kWh", style = MaterialTheme.typography.headlineLarge, color = Mint, fontWeight = FontWeight.Bold)
-            Text("Custo estimado: ${(total * EnergyRepository.tariff).currency()}")
-            Text("Tarifa de demonstração: R$ 0,85/kWh", style = MaterialTheme.typography.labelSmall)
-        } } }
-        item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Metric("Potência total", "${machines.sumOf { it.powerKw }.decimal()} kW", Modifier.weight(1f))
-            Metric("Alertas ativos", "${machines.count { it.status != MachineStatus.NORMAL }}", Modifier.weight(1f))
-        } }
-        item { ScenarioSwitch(anomaly, onAnomaly) }
-        item { FilledTonalButton(onClick = onAR, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Default.ViewInAr, null); Spacer(Modifier.width(10.dp)); Text("Visualizar compressor em AR")
-        } }
-        item { Text("Equipamentos", style = MaterialTheme.typography.titleLarge) }
-        items(machines, key = { it.id }) { MachineCard(it) { onMachine(it.id) } }
-    }
-}
-
-@Composable
-private fun Metric(label: String, value: String, modifier: Modifier) {
-    Card(modifier) { Column(Modifier.padding(16.dp)) {
-        Text(label, style = MaterialTheme.typography.labelMedium)
-        Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-    } }
-}
-
-@Composable
-fun ScenarioSwitch(anomaly: Boolean, onAnomaly: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text("Simular consumo elevado", fontWeight = FontWeight.Medium)
-            Text("Altera a potência do compressor", style = MaterialTheme.typography.bodySmall)
-        }
-        Switch(checked = anomaly, onCheckedChange = onAnomaly)
-    }
-}
-
-@Composable
-private fun MachineCard(machine: Machine, onClick: () -> Unit) {
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.PrecisionManufacturing, null, tint = machine.status.color())
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(machine.name, fontWeight = FontWeight.Bold)
-                Text(machine.status.label, color = machine.status.color(), style = MaterialTheme.typography.bodySmall)
+        },bottomBar={NavigationBar(containerColor=Ink,tonalElevation=0.dp){
+            val icons=listOf(Icons.Default.SpaceDashboard,Icons.Default.PrecisionManufacturing,Icons.Default.ViewInAr,Icons.Default.TaskAlt)
+            listOf("Operação","Máquinas","Inspecionar","Ações").forEachIndexed{i,t->NavigationBarItem(selected=tab==i,onClick={tab=i;machineId=null},icon={Icon(icons[i],t)},label={Text(t)},colors=NavigationBarItemDefaults.colors(indicatorColor=Mint.copy(alpha=.16f),selectedIconColor=Mint,selectedTextColor=Mint))}
+        }}){padding->
+            val mod=Modifier.fillMaxSize().padding(padding)
+            when(tab){
+                0->Operations(state,machines,mod,{vm.scenario(it)},{lab(true)},{machineId=it}, {tab=3})
+                1->EquipmentList(machines,mod,{machineId=it})
+                2->InspectionLab(state,useAR,{useAR=it},vm::select,vm::inspect,{id->if(vm.identify(id))message("Origem da perda localizada no cenário.")else message("Esse componente não explica a perda deste cenário. Explore os outros pontos.")},vm::scenario,{
+                    if(vm.finish()){tab=3;message("Inspeção salva no aparelho.")}
+                },mod)
+                3->Actions(state,mod,vm::resolve,{lab(false)}, {vm.assumptions(hours=it)}, {vm.assumptions(days=it)}, {vm.assumptions(tariff=it)})
             }
-            Text("${machine.powerKw.decimal()} kW", fontWeight = FontWeight.Bold)
+            machines.firstOrNull{it.id==machineId}?.let{m->ModalBottomSheet(onDismissRequest={machineId=null},containerColor=Ink){
+                Column(Modifier.verticalScroll(rememberScrollState()).padding(24.dp),verticalArrangement=Arrangement.spacedBy(18.dp)){
+                    Eyebrow("EQUIPAMENTO  /  DADOS SIMULADOS");SectionTitle(m.name,m.type);StatusPill(m.status.label,m.status.color())
+                    Row(horizontalArrangement=Arrangement.spacedBy(10.dp)){Stat("Potência","${m.powerKw.decimal()} kW",Modifier.weight(1f));Stat("Consumo hoje","${m.consumptionKwh.decimal()} kWh",Modifier.weight(1f),Blue)}
+                    SectionTitle("Trajetória de potência","6 amostras ilustrativas • linha tracejada = referência")
+                    PowerChart(m.history,m.referenceKw)
+                    Text("Referência de operação: ${m.referenceKw.decimal()} kW",color=Amber)
+                    Text(m.recommendation,color=Muted)
+                    if(m.id=="compressor")Button(onClick={lab(true)},modifier=Modifier.fillMaxWidth()){Text("Inspecionar componentes em AR")}
+                    Spacer(Modifier.height(20.dp))
+                }
+            }}
         }
     }
 }
 
 @Composable
-private fun MachineDetail(machine: Machine, modifier: Modifier, onAR: () -> Unit) {
-    LazyColumn(modifier, contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        item { SimulationLabel() }
-        item { Text(machine.type, style = MaterialTheme.typography.headlineSmall) }
-        item { Text(machine.status.label, color = machine.status.color()) }
-        item { Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Metric("Potência instantânea", "${machine.powerKw.decimal()} kW", Modifier.weight(1f))
-            Metric("Consumo hoje", "${machine.consumptionKwh.decimal()} kWh", Modifier.weight(1f))
-        } }
-        item { Text("Referência: ${machine.referenceKw.decimal()} kW • Variação: ${machine.deviationPercent.decimal()}%") }
-        item { Card { Column(Modifier.padding(18.dp)) {
-            Text("Histórico simulado de potência", fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(14.dp))
-            PowerChart(machine.history)
-            Text("Últimas 6 amostras • kW", style = MaterialTheme.typography.labelSmall)
-        } } }
-        item { Text("Orientação", style = MaterialTheme.typography.titleMedium); Text(machine.recommendation) }
-        if(machine.id == "compressor") item { Button(onClick = onAR, modifier = Modifier.fillMaxWidth()) { Text("Abrir compressor em AR") } }
+private fun Operations(s:InspectionState,machines:List<Machine>,modifier:Modifier,onScenario:(Scenario)->Unit,onAR:()->Unit,onMachine:(String)->Unit,onActions:()->Unit){
+    val total=machines.sumOf{it.consumptionKwh}
+    LazyColumn(modifier,contentPadding=PaddingValues(22.dp),verticalArrangement=Arrangement.spacedBy(22.dp)){
+        item{Column(verticalArrangement=Arrangement.spacedBy(8.dp)){Eyebrow("CENTRAL DE OPERAÇÕES");Text("Encontre a perda.\nEntenda o impacto.",style=MaterialTheme.typography.headlineLarge,fontWeight=FontWeight.Bold);Text("Explore um equipamento, investigue componentes e transforme a inspeção em uma ação.",color=Muted)}}
+        item{Column(Modifier.fillMaxWidth().background(Brush.linearGradient(listOf(Color(0xFF193C3F),Panel)),RoundedCornerShape(28.dp)).padding(22.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Eyebrow("MISSÃO ATIVA",Mint);StatusPill(s.scenario.label,if(s.scenario==Scenario.NORMAL)Mint else Coral)}
+            Image(painterResource(R.drawable.compressor_preview),"Modelo do compressor com motor, reservatório e válvula",Modifier.fillMaxWidth().height(165.dp))
+            Text(s.scenario.headline,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold)
+            Text("4 componentes • circuito interno • exploração em AR",color=Muted,style=MaterialTheme.typography.bodySmall)
+            Button(onClick=onAR,modifier=Modifier.fillMaxWidth(),contentPadding=PaddingValues(15.dp)){Text("Iniciar inspeção em AR",Modifier.weight(1f));Icon(Icons.AutoMirrored.Filled.ArrowForward,null)}
+        }}
+        item{ScenarioPicker(s.scenario,onScenario)}
+        item{Row(horizontalArrangement=Arrangement.spacedBy(12.dp)){Stat("Potencial mensal",s.monthlySaving.currency(),Modifier.weight(1f));Stat("Potência evitável","${s.extraKw.decimal()} kW",Modifier.weight(1f),Coral)}}
+        item{Text("Estimativa simulada: ${s.hours.decimal()} h/dia × ${s.days} dias × ${s.tariff.currency()}/kWh. Ajuste as premissas na aba Ações.",color=Muted,style=MaterialTheme.typography.bodySmall)}
+        item{SectionTitle("Pulso da operação","Valores ilustrativos de hoje")}
+        item{Row(horizontalArrangement=Arrangement.spacedBy(12.dp)){Stat("Consumo acumulado","${total.decimal()} kWh",Modifier.weight(1f),Blue);Stat("Custo estimado",(total*s.tariff).currency(),Modifier.weight(1f),Amber)}}
+        items(machines,key={it.id}){MachineRow(it){onMachine(it.id)}}
+        item{OutlinedButton(onClick=onActions,modifier=Modifier.fillMaxWidth()){Text("Ver inspeções e plano de ação")}}
+        item{Text("Modo educativo. A câmera posiciona objetos virtuais; não mede energia nem detecta falhas em equipamentos reais.",color=Muted,style=MaterialTheme.typography.bodySmall)}
+    }
+}
+@Composable fun ScenarioPicker(selected:Scenario,onChange:(Scenario)->Unit){
+    Column(verticalArrangement=Arrangement.spacedBy(9.dp)){
+        Eyebrow("CENÁRIO DE TREINAMENTO")
+        Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)){
+            Scenario.entries.forEach{s->FilterChip(selected=selected==s,onClick={onChange(s)},label={Text(s.label)},leadingIcon={Icon(when(s){Scenario.NORMAL->Icons.Default.CheckCircle;Scenario.LEAK->Icons.Default.Air;Scenario.IDLE->Icons.Default.Schedule},null,Modifier.size(18.dp))})}
+        }
+    }
+}
+@Composable private fun MachineRow(m:Machine,onClick:()->Unit){
+    Card(onClick=onClick,modifier=Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=Panel)){
+        Row(Modifier.padding(18.dp),verticalAlignment=Alignment.CenterVertically){
+            Box(Modifier.size(46.dp).background(m.status.color().copy(alpha=.1f),RoundedCornerShape(14.dp)),contentAlignment=Alignment.Center){Icon(Icons.Default.PrecisionManufacturing,null,tint=m.status.color())}
+            Spacer(Modifier.width(14.dp));Column(Modifier.weight(1f)){Text(m.name,fontWeight=FontWeight.Bold);Text(m.status.label,color=m.status.color(),style=MaterialTheme.typography.bodySmall)}
+            Text("${m.powerKw.decimal()} kW",fontWeight=FontWeight.Bold)
+        }
+    }
+}
+@Composable private fun EquipmentList(machines:List<Machine>,modifier:Modifier,onClick:(String)->Unit){
+    LazyColumn(modifier,contentPadding=PaddingValues(22.dp),verticalArrangement=Arrangement.spacedBy(16.dp)){
+        item{SectionTitle("Seu parque industrial","3 equipamentos • dados simulados")}
+        items(machines,key={it.id}){m->MachineRow(m){onClick(m.id)}}
+        item{Text("O compressor possui um gêmeo 3D educativo com componentes interativos. Injetora e extrusora possuem acompanhamento de dados nesta versão.",color=Muted)}
     }
 }
 
-@Composable
-private fun PowerChart(values: List<Double>) {
-    Canvas(Modifier.fillMaxWidth().height(130.dp)) {
-        val max = (values.maxOrNull() ?: 1.0) * 1.15
-        for(i in 1..3) drawLine(Color(0xFF3A4955), Offset(0f, size.height*i/4), Offset(size.width, size.height*i/4))
-        val points = values.mapIndexed { i,v -> Offset(i*size.width/(values.size-1), size.height-(v/max*size.height).toFloat()) }
-        val path = Path().apply { points.forEachIndexed { i,p -> if(i==0) moveTo(p.x,p.y) else lineTo(p.x,p.y) } }
-        drawPath(path, Mint, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 5f))
-        points.forEach { drawCircle(Mint, 5f, it) }
+@Composable private fun Actions(s:InspectionState,modifier:Modifier,onResolve:(String)->Unit,onInspect:()->Unit,onHours:(Double)->Unit,onDays:(Int)->Unit,onTariff:(Double)->Unit){
+    val context=LocalContext.current
+    LazyColumn(modifier,contentPadding=PaddingValues(22.dp),verticalArrangement=Arrangement.spacedBy(20.dp)){
+        item{SectionTitle("Da inspeção à ação","Registros salvos localmente no aparelho")}
+        item{Row(horizontalArrangement=Arrangement.spacedBy(12.dp)){Stat("Inspeções","${s.records.size}",Modifier.weight(1f),Blue);Stat("Pendências","${s.records.count{!it.resolved}}",Modifier.weight(1f),Amber)}}
+        item{Column(Modifier.background(Panel,RoundedCornerShape(24.dp)).padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
+            Eyebrow("SIMULADOR DE ECONOMIA",Mint)
+            Text(s.monthlySaving.currency(),style=MaterialTheme.typography.headlineLarge,fontWeight=FontWeight.Bold,color=Mint)
+            Text("Potencial mensal para o cenário ${s.scenario.label.lowercase()}. Premissas ajustáveis; não representa economia medida.",color=Muted,style=MaterialTheme.typography.bodySmall)
+            Text("Operação: ${s.hours.decimal()} horas/dia");Slider(value=s.hours.toFloat(),onValueChange={onHours(it.toDouble())},valueRange=1f..24f,steps=22)
+            Text("Dias por mês: ${s.days}");Slider(value=s.days.toFloat(),onValueChange={onDays(it.toInt())},valueRange=1f..31f,steps=29)
+            Text("Tarifa: ${s.tariff.currency()}/kWh");Slider(value=s.tariff.toFloat(),onValueChange={onTariff(it.toDouble())},valueRange=.1f..3f)
+            Text("(${s.scenario.power.decimal()} − ${s.scenario.reference.decimal()}) kW × horas × dias × tarifa",color=Muted,style=MaterialTheme.typography.labelSmall)
+        }}
+        if(s.records.isEmpty())item{Column(verticalArrangement=Arrangement.spacedBy(12.dp)){Icon(Icons.Default.FactCheck,null,tint=Mint,modifier=Modifier.size(40.dp));Text("Sua primeira inspeção começa com uma pergunta: onde a energia está escapando?",color=Muted);Button(onClick=onInspect){Text("Explorar compressor em 3D")}}}
+        items(s.records,key={it.id}){r->Column(Modifier.fillMaxWidth().background(Panel,RoundedCornerShape(24.dp)).padding(20.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Eyebrow(SimpleDateFormat("dd/MM • HH:mm",Locale.forLanguageTag("pt-BR")).format(Date(r.timestamp)));StatusPill(if(r.resolved)"Concluída" else "Ação pendente",if(r.resolved)Mint else Amber)}
+            Text("Compressor 01 • ${r.scenario.label}",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold)
+            Text(r.scenario.finding(),color=Muted)
+            Text("${r.observedKw.decimal()} kW observados • ${r.projectedMonthlySaving.currency()}/mês de potencial",color=Mint)
+            Text("Premissas: ${r.hours.decimal()} h × ${r.days} dias × ${r.tariff.currency()}/kWh",style=MaterialTheme.typography.labelSmall,color=Muted)
+            if(!r.resolved)Button(onClick={onResolve(r.id)},modifier=Modifier.fillMaxWidth()){Text("Simular correção e concluir ação")}
+            TextButton(onClick={
+                val report="EnergyAR — Relatório educativo\nCompressor 01 | ${r.scenario.label}\n${r.scenario.finding()}\nPotência observada: ${r.observedKw.decimal()} kW\nPotencial mensal: ${r.projectedMonthlySaving.currency()}\nPremissas: ${r.hours.decimal()} h/dia, ${r.days} dias, ${r.tariff.currency()}/kWh\nEstado: ${if(r.resolved)"concluído" else "pendente"}\nTodos os dados e achados são simulados."
+                context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply{type="text/plain";putExtra(Intent.EXTRA_TEXT,report)},"Compartilhar inspeção"))
+            }){Icon(Icons.Default.Share,null,Modifier.size(16.dp));Spacer(Modifier.width(8.dp));Text("Compartilhar relatório")}
+        }}
     }
 }
