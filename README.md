@@ -1,78 +1,79 @@
-# EnergyAR 0.2 — Inspeção energética interativa
+# EnergyAR — Industrial Inspection Lab
 
-Aplicativo Android acadêmico em Kotlin. O usuário investiga um compressor virtual por componente, explora seu circuito interno e transforma achados simulados em registros e ações. O repositório mantém o nome LinearAR.
+A Kotlin Android application for inspecting a simulated compressor in 3D and augmented reality, then recording findings and follow-up actions.
 
-## Experiência
+The repository retains the name **LinearAR**. It is an academic simulation, not a live industrial monitoring system.
 
-### Central de operações
+## Why this exists
 
-Visão de consumo, potência, custo e equipamentos. Três cenários de treinamento: operação normal, vazamento e funcionamento ocioso. Cada cenário tem referência de potência própria, sem chamar variação energética de eficiência produtiva.
+A 3D model becomes useful when it supports a complete inspection workflow: explore components, identify a simulated issue, record evidence, and retain the assumptions behind an impact estimate.
 
-### Laboratório 3D e realidade aumentada
+## What it does
 
-- Compressor original mais detalhado, dividido em reservatório, motor/cabeçote, válvula e manômetro.
-- Toque nas peças ou nos pontos numerados para consultar informações e registrar a inspeção.
-- **Operação:** equipamento montado com os pontos de inspeção.
-- **Raio X:** reservatório oculto, tubulações internas e partículas de fluxo de ar animadas.
-- **Desmontar:** separação animada de motor, válvula e manômetro.
-- Fuga de ar representada por partículas vermelhas no cenário de vazamento.
-- Modo 3D com exploração por câmera virtual; modo AR com detecção de superfície horizontal e ancoragem no mundo real.
-- Pontos numerados no AR projetados a partir das coordenadas dos componentes, acompanhando o modelo.
-- Controles de giro, tamanho e reposicionamento.
+- Displays normal, leakage, and idle-operation scenarios.
+- Explores a compressor through assembled, X-ray, and exploded views.
+- Uses numbered component selection and a gated inspection checklist.
+- Provides a camera-free 3D lab and an ARCore surface-anchored mode.
+- Stores inspections and follow-up actions locally.
+- Shares a textual report through Android's native share flow.
 
-O painel de texto permanece na tela para leitura. Os pontos de seleção acompanham o modelo no AR. O app não reconhece máquinas ou marcadores físicos, não usa sensores e não detecta vazamentos reais.
+## Architecture
 
-### Missão de inspeção
+Compose screens use `EnergyViewModel` for inspection state. Domain calculations and completion rules live in `data/Inspection.kt`; `InspectionStore` persists history and preferences. SceneView renders the component rig in the 3D/AR lab.
 
-Confira quatro componentes e, nos cenários com perda, identifique sua origem. O aplicativo só permite concluir depois dos quatro pontos e da identificação correta. A operação normal exige os quatro pontos, sem inventar um achado.
+| Component | Location |
+| --- | --- |
+| Inspection domain | `app/src/main/java/` → `data/Inspection.kt` |
+| State and persistence | `EnergyViewModel.kt`, `data/InspectionStore.kt` |
+| UI and navigation | `ui/` |
+| Model assembly and animation | `ar/CompressorRig.kt` |
+| AR anchoring and component projection | `ar/ARScreen.kt` |
+| Reproducible model generation | `tools/generate_models.py` |
 
-### Ações e impacto
+## Tech stack
 
-- Histórico local de inspeções, preservado depois de reiniciar o app.
-- Pendências por inspeção e correção simulada, retornando o cenário à operação normal.
-- Estimativa mensal com tarifa, horas/dia e dias de operação ajustáveis.
-- Compartilhamento de relatório textual pelo menu nativo do Android.
+Kotlin, Jetpack Compose, Android ViewModel, ARCore, SceneView, Gradle, JUnit and Robolectric.
 
-A estimativa usa `(potência observada − referência) × horas/dia × dias/mês × tarifa`, com resultado mínimo zero. É potencial hipotético; não é economia medida nem um comando enviado a máquinas reais. Cada relatório preserva as premissas usadas quando foi salvo.
+## Getting started
 
-## Executar
+Open the project in Android Studio with JDK 17 and Android SDK 35. Sync Gradle and run the `app` module. Minimum Android version: 7.0.
 
-Abra o projeto no Android Studio, sincronize o Gradle e execute o módulo `app`. Use JDK 17 e Android SDK 35. Android mínimo: 7.0.
-
-Para AR, use um dispositivo compatível com ARCore e Google Play Services para RA atualizado. O laboratório 3D funciona sem câmera e permite explorar a experiência em aparelhos sem AR.
+AR requires a compatible device and Google Play Services for AR. The 3D lab does not require the camera.
 
 ```bash
 ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 ```
 
-O APK fica em `app/build/outputs/apk/debug/app-debug.apk`. GitHub Actions executa as verificações e publica o APK como artefato.
+The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. GitHub Actions runs the checks and uploads the APK as an artifact.
 
-## Roteiro para a apresentação
+## Demo journey
 
-1. No dashboard, selecione **Vazamento** e toque em **Iniciar inspeção em AR**.
-2. Autorize a câmera, detecte uma mesa e toque nela para ancorar o compressor.
-3. Experimente **Desmontar** e **Raio X**. Observe o fluxo e a fuga vermelha na válvula.
-4. Selecione os quatro componentes, leia suas funções e marque cada inspeção.
-5. Na válvula, marque **Origem da perda**. Salve a inspeção.
-6. Em **Ações**, ajuste premissas, compartilhe o relatório e simule a correção.
-7. Demonstre que o cenário voltou a Normal e que o histórico mantém o achado original.
+Select the leakage scenario, start inspection, explore X-ray/exploded modes, inspect all four components, mark the valve as the issue source, save, and share the report. Simulating a correction restores the normal scenario while preserving the original finding.
 
-## Estrutura
+## Engineering highlights
 
-- `data/Inspection.kt`: cenários, componentes, estimativas e contrato da inspeção.
-- `data/InspectionStore.kt`: histórico e preferências locais.
-- `EnergyViewModel.kt`: fluxo e persistência da inspeção.
-- `ui/`: interface Compose, dashboard, equipamentos e ações.
-- `ar/CompressorRig.kt`: peças, pontos e animações.
-- `ar/ARScreen.kt`: laboratório, câmera, ancoragem e projeção dos pontos.
-- `tools/generate_models.py`: geração reproduzível de GLBs originais; requer numpy.
-- `assets/models/LICENSE.txt`: licença CC0 dos modelos.
-- `docs/EnergyAR_Objeto_3D.docx`: proposta inicial do objeto para a disciplina.
+- Completion rules prevent saving an unfinished inspection.
+- Stored reports preserve the input assumptions used for estimates.
+- Domain tests cover costs, scenario references, and completion conditions.
+- Camera-free navigation tests use Robolectric; actual AR tracking requires hardware testing.
+- Original model assets include a CC0 license.
 
-## Verificação
+## Technical decisions
 
-Os testes cobrem cálculos, condições de conclusão, referência de ociosidade, recuperação dos registros e navegação das telas sem câmera. As imagens de verificação de interface são geradas em `app/build/ui-check/` pelos testes Robolectric. A interação AR e o desempenho de renderização precisam ser verificados em celular compatível.
+- A camera-free mode makes the domain workflow usable without AR-capable hardware.
+- Inspection history is local; there is no remote service dependency.
+- Impact estimates use explicit tariff and operating-time inputs instead of claiming measured savings.
 
-Injetora e extrusora possuem acompanhamento de dados; o compressor é o equipamento com gêmeo 3D interativo. Não há integração com IA ou sensores nesta versão.
+## Limitations
 
-Referências técnicas: [SceneView 2.3.0](https://github.com/SceneView/sceneview/tree/v2.3.0) e [ARCore](https://developers.google.com/ar/develop).
+The app does not recognize physical machines, read sensors, or detect real leaks. Compressor behavior and corrections are simulated. Cost impact is hypothetical:
+
+`max(0, observed power − reference power) × hours/day × days/month × tariff`.
+
+The compressor is the interactive 3D equipment; other equipment views do not imply equivalent digital-twin functionality. Device performance and AR interactions still need verification on compatible phones.
+
+## Roadmap
+
+- Record a reproducible demo on a real AR-capable device.
+- Keep inspection rules independent from rendering.
+- Improve accessibility and device compatibility checks.
