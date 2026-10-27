@@ -18,6 +18,7 @@ class CompressorRig(engine:Engine, modelLoader:ModelLoader, materialLoader:Mater
     val parts=linkedMapOf<ComponentId,ModelNode>()
     val markers=linkedMapOf<ComponentId,Node>()
     private val circuit=ModelNode(modelLoader.createModelInstance("models/circuit.glb"))
+    private val extras=linkedMapOf<String,ModelNode>()
     private val flow=mutableListOf<Node>()
     private val leakage=mutableListOf<Node>()
     private val origins=mapOf(ComponentId.TANK to Position(0f,.43f,.32f),ComponentId.MOTOR to Position(.1f,1.19f,0f),ComponentId.VALVE to Position(.75f,.69f,0f),ComponentId.GAUGE to Position(.4f,.9f,.24f))
@@ -32,10 +33,18 @@ class CompressorRig(engine:Engine, modelLoader:ModelLoader, materialLoader:Mater
             val point=SphereNode(engine,radius=.025f,stacks=8,slices=12,materialInstance=marker).apply{position=origins.getValue(id);name=id.name}
             markers[id]=point;root.addChildNode(point)
         }
+        listOf("sensor" to Position(-.9f,.05f,.25f), "filter" to Position(.9f,.05f,.25f)).forEach { (id, position) ->
+            val model=ModelNode(modelLoader.createModelInstance("models/$id.glb"))
+            model.position=position
+            extras[id]=model
+            root.addChildNode(model)
+        }
         root.addChildNode(circuit)
         repeat(16){val p=SphereNode(engine,radius=.013f,stacks=6,slices=8,materialInstance=blue);flow+=p;root.addChildNode(p)}
         repeat(9){val p=SphereNode(engine,radius=.015f,stacks=6,slices=8,materialInstance=red);leakage+=p;root.addChildNode(p)}
     }
+    fun pickedExtra(node:Node?):String?=generateSequence(node){it.parent}.mapNotNull { n -> extras.entries.firstOrNull{it.value===n}?.key }.firstOrNull()
+    fun setCollected(ids:Set<String>) { extras.forEach { (id,node) -> node.isVisible=id !in ids } }
     fun picked(node:Node?):ComponentId?=generateSequence(node){it.parent}.mapNotNull { n -> parts.entries.firstOrNull{it.value===n}?.key ?: markers.entries.firstOrNull{it.value===n}?.key }.firstOrNull()
     fun animate(seconds:Float,mode:VisualMode,scenario:Scenario,selected:ComponentId?,scale:Float,rotation:Float) {
         root.scale=Scale(scale);root.rotation=Rotation(0f,rotation,0f)
