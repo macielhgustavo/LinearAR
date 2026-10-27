@@ -1,5 +1,7 @@
 package br.com.linear.energyar.ar
 
+import android.media.MediaPlayer
+import br.com.linear.energyar.R
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -55,11 +57,27 @@ fun InspectionLab(s:InspectionState,useAR:Boolean,onAR:(Boolean)->Unit,onSelect:
     var angle by rememberSaveable{mutableFloatStateOf(0f)}
     var scale by rememberSaveable{mutableFloatStateOf(.55f)}
     var reset by remember{mutableIntStateOf(0)}
+    var collected by remember { mutableStateOf(setOf<String>()) }
+    var sound by rememberSaveable { mutableStateOf(true) }
+    val soundContext=LocalContext.current
+    val soundLifecycle=LocalLifecycleOwner.current
+    DisposableEffect(soundLifecycle, sound) {
+        val player=if(sound) MediaPlayer.create(soundContext, R.raw.ambiente) else null
+        player?.isLooping=true
+        if(soundLifecycle.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) player?.start()
+        val observer=LifecycleEventObserver { _, event ->
+            if(event==Lifecycle.Event.ON_RESUME) player?.start()
+            if(event==Lifecycle.Event.ON_PAUSE && player?.isPlaying==true) player.pause()
+        }
+        soundLifecycle.lifecycle.addObserver(observer)
+        onDispose { soundLifecycle.lifecycle.removeObserver(observer); player?.release() }
+    }
     var showGuide by rememberSaveable{mutableStateOf(s.records.isEmpty())}
     Column(modifier.padding(horizontal=16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
             Column(Modifier.weight(1f)){Eyebrow("INSPEÇÃO GUIADA",Mint);Text("Compressor 01",style=MaterialTheme.typography.titleLarge)}
             StatusPill("${s.checked.size}/4",if(s.complete)Mint else Blue)
+            IconButton(onClick={sound=!sound}) { Icon(if(sound) Icons.Default.VolumeUp else Icons.Default.VolumeOff, if(sound) "Desligar som" else "Ligar som") }
             IconButton(onClick={showGuide=true}){Icon(Icons.Default.HelpOutline,"Como inspecionar")}
         }
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)){
@@ -67,7 +85,7 @@ fun InspectionLab(s:InspectionState,useAR:Boolean,onAR:(Boolean)->Unit,onSelect:
             FilterChip(selected=useAR,onClick={onAR(true)},label={Text("AR ao vivo")},leadingIcon={Icon(Icons.Default.CameraAlt,null,Modifier.size(16.dp))})
         }
         Box(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Brush.radialGradient(listOf(Color(0xFF24434B),Ink)))){
-            key(useAR,reset){InspectionViewport(s,useAR,mode,scale,angle,onSelect,Modifier.fillMaxSize())}
+            key(useAR,reset){InspectionViewport(s,useAR,mode,scale,angle,onSelect,collected,{ collected=collected+it },Modifier.fillMaxSize())}
             Row(Modifier.align(Alignment.BottomEnd).padding(10.dp).background(Ink.copy(alpha=.8f),RoundedCornerShape(50)),verticalAlignment=Alignment.CenterVertically){
                 IconButton(onClick={angle=(angle+45)%360}){Icon(Icons.Default.RotateRight,"Girar modelo 45 graus",tint=Mint)}
                 IconButton(onClick={scale=(scale-.1f).coerceAtLeast(.25f)}){Icon(Icons.Default.Remove,"Diminuir modelo")}
@@ -75,6 +93,7 @@ fun InspectionLab(s:InspectionState,useAR:Boolean,onAR:(Boolean)->Unit,onSelect:
                 IconButton(onClick={reset++;angle=0f;scale=.55f}){Icon(Icons.Default.RestartAlt,"Reposicionar modelo")}
             }
         }
+        Text("Coleta: ${collected.size}/2 • Toque no sensor e no filtro ao lado do compressor.", color=Muted, style=MaterialTheme.typography.labelSmall)
         Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)){
             VisualMode.entries.forEach{m->FilterChip(selected=mode==m,onClick={mode=m},label={Text(m.label)})}
         }
@@ -117,7 +136,7 @@ fun InspectionLab(s:InspectionState,useAR:Boolean,onAR:(Boolean)->Unit,onSelect:
 }
 private data class ScreenMarker(val id:ComponentId,val x:Int,val y:Int)
 
-@Composable private fun InspectionViewport(s:InspectionState,useAR:Boolean,mode:VisualMode,scale:Float,angle:Float,onSelect:(ComponentId)->Unit,modifier:Modifier){
+@Composable private fun InspectionViewport(s:InspectionState,useAR:Boolean,mode:VisualMode,scale:Float,angle:Float,onSelect:(ComponentId)->Unit,collected:Set<String>,onCollect:(String)->Unit,modifier:Modifier){
     val context=LocalContext.current
     var granted by remember{mutableStateOf(ContextCompat.checkSelfPermission(context,Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED)}
     val lifecycle=LocalLifecycleOwner.current
@@ -140,6 +159,8 @@ private data class ScreenMarker(val id:ComponentId,val x:Int,val y:Int)
     val latestState by rememberUpdatedState(s);val latestMode by rememberUpdatedState(mode)
     val latestScale by rememberUpdatedState(scale);val latestAngle by rememberUpdatedState(angle)
     val latestSelect by rememberUpdatedState(onSelect)
+    val latestCollect by rememberUpdatedState(onCollect)
+    val latestCollected by rememberUpdatedState(collected)
     val start=remember{System.nanoTime()};val lastProjection=remember{longArrayOf(0)}
     val viewMatrix=remember{FloatArray(16)};val projection=remember{FloatArray(16)};val combined=remember{FloatArray(16)};val point=remember{FloatArray(4)}
     DisposableEffect(rig,useAR){if(!useAR && rig!=null){rig.root.position=Position(0f,-.3f,0f);nodes.add(rig.root)};onDispose{nodes.filterIsInstance<AnchorNode>().forEach{it.anchor?.detach()}}}
@@ -153,6 +174,7 @@ private data class ScreenMarker(val id:ComponentId,val x:Int,val y:Int)
                     val message=if(f.camera.trackingState!=TrackingState.TRACKING)"Melhore a iluminação e movimente o celular devagar."else if(placed)"Compressor ancorado • toque nos pontos de inspeção"else "Toque na superfície detectada para posicionar."
                     if(message!=tracking)tracking=message
                     if(placed){
+                        rig.setCollected(latestCollected)
                         rig.animate((System.nanoTime()-start)/1e9f,latestMode,latestState.scenario,latestState.selected,latestScale,latestAngle)
                         if(f.timestamp-lastProjection[0]>100_000_000 && viewport.width>0 && f.camera.trackingState==TrackingState.TRACKING){
                             lastProjection[0]=f.timestamp;f.camera.getViewMatrix(viewMatrix,0);f.camera.getProjectionMatrix(projection,0,.05f,100f);Matrix.multiplyMM(combined,0,projection,0,viewMatrix,0)
@@ -163,8 +185,10 @@ private data class ScreenMarker(val id:ComponentId,val x:Int,val y:Int)
                         }
                     }else markers=emptyList()
                 },onGestureListener=rememberOnGestureListener(onSingleTapConfirmed={event,node->
+                    val extra=rig.pickedExtra(node)
                     val id=rig.picked(node)
-                    if(id!=null)latestSelect(id)
+                    if(extra!=null && extra !in latestCollected) latestCollect(extra)
+                    else if(id!=null)latestSelect(id)
                     else if(!placed){
                         val hit=frameHolder[0]?.hitTest(event.x,event.y)?.firstOrNull{val p=it.trackable as? Plane;p?.type==Plane.Type.HORIZONTAL_UPWARD_FACING&&it.isValid(depthPoint=false,point=false)}
                         hit?.createAnchorOrNull()?.let{a->try{val anchor=AnchorNode(engine,a);rig.root.position=Position(0f);anchor.addChildNode(rig.root);nodes.add(anchor);placed=true}catch(e:Exception){a.detach();error="Não foi possível ancorar o modelo. Reposicione e tente novamente."}}
@@ -173,8 +197,8 @@ private data class ScreenMarker(val id:ComponentId,val x:Int,val y:Int)
             else{
                 val camera=rememberCameraNode(engine){position=Position(1.1f,.85f,1.6f);lookAt(Position(0f,.1f,0f))}
                 Scene(modifier=Modifier.fillMaxSize(),engine=engine,modelLoader=models,materialLoader=materials,cameraNode=camera,childNodes=nodes,isOpaque=false,
-                    onFrame={rig.animate((System.nanoTime()-start)/1e9f,latestMode,latestState.scenario,latestState.selected,latestScale,latestAngle)},
-                    onGestureListener=rememberOnGestureListener(onSingleTapConfirmed={_,node->rig.picked(node)?.let{latestSelect(it)}}))
+                    onFrame={rig.setCollected(latestCollected);rig.animate((System.nanoTime()-start)/1e9f,latestMode,latestState.scenario,latestState.selected,latestScale,latestAngle)},
+                    onGestureListener=rememberOnGestureListener(onSingleTapConfirmed={_,node-> val extra=rig.pickedExtra(node); if(extra!=null && extra !in latestCollected) latestCollect(extra) else rig.picked(node)?.let{latestSelect(it)}}))
             }
         }
         Text(error ?: if(useAR)tracking else "Arraste para explorar • toque nas peças",color=Color.White,style=MaterialTheme.typography.labelSmall,modifier=Modifier.align(Alignment.TopStart).padding(12.dp).background(Ink.copy(alpha=.8f),RoundedCornerShape(8.dp)).padding(8.dp))
